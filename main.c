@@ -9,7 +9,7 @@
 
 #define PACKET_SIZE 3
 #define DOUBLE_SIZE sizeof(double)
-volatile sig_atomic_t time_expired = 0;
+static pid_t pPid;
 
 int checkError(int val, const char *msg) {
     if (val == -1) {
@@ -22,39 +22,31 @@ int checkError(int val, const char *msg) {
 void signalHandler(int sig){
     char response;
 
-    // Sigint handles control c
     if(sig == SIGINT){
-        printf("\nAre you sure (Y/n)? ");
+        fflush(stdin);
+        printf("\nAre you sure you want to exit (Y/n)? \n");
         scanf(" %c", &response);
-        if (response == 'Y') {
+        if (response == 'Y' || response == 'y') {
             exit(EXIT_SUCCESS);
         }
     }
-    // Handles timer expiring
-    if(sig == SIGALRM){
-        time_expired = 1;
-        printf("\nTime's UP!\n");
+    if (sig == SIGCHLD) {
+        printf("Child has exited\n");
+        while(waitpid(-1, NULL, WNOHANG) > 0);
     }
-    if (sig == SIGUSR1){
-        printf("Warning! roll outside of bounds");
+    if (sig == SIGUSR1) {
+        printf("Warning! Roll outside of bounds\n");
     }
-    if(sig == SIGUSR2){
-        printf("Warning! pitch outside of bounds");
+    if (sig == SIGUSR2) {
+        printf("Warning! Pitch outside of bounds\n");
     }
-    
-}
-
-void childSignalHandler(int sig){
     if(sig == SIGTERM){
-        printf("Parents has died, needs to terminate");
-    }
-    if(sig == SIGINT){
-        // Handle sig int for the child process
+        printf("Parent has died, child terminating...\n");
+        exit(EXIT_SUCCESS);
     }
 }
 
 int main(){
-
 
     pid_t childPID;
     const char *input_file = "angl.dat";
@@ -64,64 +56,91 @@ int main(){
     ts.tv_sec=1;
     ts.tv_nsec=0;
 
+    struct sigaction sa;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler = signalHandler;
+    sa.sa_flags = 0;
 
+    // Register signals in parent
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGCHLD, &sa, NULL);
+    sigaction(SIGUSR1, &sa, NULL);
+    sigaction(SIGUSR2, &sa, NULL);
 
-    // Create child signal processes here
+    pPid = getpid();
 
-    // Control C
-    struct sigaction sa_int;
-    sa_int.sa_handler = signalHandler;
-    sa_int.sa_flags = 0;
-    sigemptyset(&sa_int.sa_mask);
-    sigaction(SIGINT, &sa_int, NULL);
-
-    int input_fd = checkError(open(input_file, O_RDONLY), "Open angl.dat");
-
+    int input_fd = checkError(open(input_file, O_RDONLY), "Open angl.dat\n");
     double buffer[PACKET_SIZE*DOUBLE_SIZE];
 
-    // Combine the while loop and switch statement below to get the child
-    // to execute the code in the while loop
-
-    while (read(input_fd, buffer, DOUBLE_SIZE * PACKET_SIZE) == DOUBLE_SIZE * PACKET_SIZE)
-    {
-        // If range conditions are met for roll and pitch, print values   
-        double roll = buffer[0];
-        double pitch = buffer[1];
-        double yaw = buffer[2];
-
-
-        if(roll > -20 && roll < 20 && pitch > -20 && pitch < 20)
-        {
-            printf("Values for roll and pitch inside the range -20 to 20\n");
-            printf("Roll: %.2lf, Pitch: %.2lf \n", roll, pitch);
-            fflush(stdout);
-        }
-        nanosleep(&ts, NULL);
+    if (sigaction(SIGCHLD, &sa,NULL)==-1){
+        perror("sigaction for SIGCHLD\n");
+        exit(EXIT_FAILURE);
     }
-
+    if(sigaction(SIGUSR1, &sa,NULL)==-1){
+        printf("Warning! roll outside of bounds\n");
+        exit(EXIT_FAILURE);
+    }
+    if(sigaction(SIGUSR2, &sa,NULL)==-1){
+        printf("Warning! pitch outside of bounds\n");
+        exit(EXIT_FAILURE);
+    }
+    
     // Creates child processes
-    switch(childPID=fork())
+    switch(childPID = fork())
     {
     case -1:
-        perror("fork");
+        perror("fork\n");
         exit(EXIT_FAILURE);
     case 0:
-        printf("We are in the child");
+
+
+        struct sigaction sa_child;
+        sigemptyset(&sa_child.sa_mask);
+        sa_child.sa_handler = signalHandler;
+        sa_child.sa_flags = 0;
+        
+        // Handle SIGTERM in child
+        sigaction(SIGTERM, &sa_child, NULL);
+
+
+        // Handles child behavior
+        printf("We are in the child\n");
+        while (read(input_fd, buffer, DOUBLE_SIZE * PACKET_SIZE) == DOUBLE_SIZE * PACKET_SIZE)
+        {
+            printf("Testing while loop\n");
+            double roll = buffer[0];
+            double pitch = buffer[1];
+            double yaw = buffer[2];
+        
+            if(pitch < -20 || pitch > 20) {
+                kill(getppid(), SIGUSR1);  // Notify parent about pitch issue
+            }
+            if(roll < -20 || roll > 20) {
+                kill(getppid(), SIGUSR2);  // Notify parent about roll issue
+            }
+        
+            nanosleep(&ts, NULL); // Prevent CPU overuse
+        }
+        
+        // Child finishes processing
+        printf("Child process done. Exiting...\n");
         exit(EXIT_SUCCESS);
     default:
-        printf("We are in the parents, just after calling fork");
+
+
+        printf("We are in the parents, just after calling fork\n");
         while(1)
         {
             childPID = wait(NULL);
             if (childPID == -1){
                 if(errno == ECHILD){
-                    printf("Our last child has stopped. Goodbye");
+                    printf("Our last child has stopped. Goodbye\n");
                     exit(EXIT_SUCCESS);
                 }
             }
             else
             {
-                perror("Wait");
+                perror("Wait\n");
                 exit(EXIT_FAILURE);
             }
         }
