@@ -46,7 +46,7 @@ void signalHandler(int sig){
         printf("Warning! Pitch outside of bounds\n");
     }
     if(sig == SIGTERM){
-        printf("Fhas died, child terminating...\n");
+        printf("Parent has died, child terminating...\n");
         exit(EXIT_SUCCESS);
     }
 }
@@ -80,19 +80,6 @@ int main(){
 
     int input_fd = checkError(open(input_file, O_RDONLY), "Open angl.dat\n");
     double buffer[PACKET_SIZE*DOUBLE_SIZE];
-
-    // if (sigaction(SIGCHLD, &sa,NULL)==-1){
-    //     perror("sigaction for SIGCHLD\n");
-    //     exit(EXIT_FAILURE);
-    // }
-    // if(sigaction(SIGUSR1, &sa,NULL)==-1){
-    //     printf("Warning! roll outside of bounds\n");
-    //     exit(EXIT_FAILURE);
-    // }
-    // if(sigaction(SIGUSR2, &sa,NULL)==-1){
-    //     printf("Warning! pitch outside of bounds\n");
-    //     exit(EXIT_FAILURE);
-    // }
     
     // Blocking sigint before forking so it doesn't get called twice
     sigprocmask(SIG_BLOCK, &blockSet, &oldSet);
@@ -122,10 +109,10 @@ int main(){
             double pitch = buffer[1];
             double yaw = buffer[2];
         
-            if(pitch < -20 || pitch > 20) {
+            if(roll < -20 || roll > 20) {
                 kill(getppid(), SIGUSR1);  
             }
-            if(roll < -20 || roll > 20) {
+            if(pitch < -20 || pitch > 20) {
                 kill(getppid(), SIGUSR2);  
             }
             
